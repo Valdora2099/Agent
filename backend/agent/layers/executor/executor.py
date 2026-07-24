@@ -1,6 +1,7 @@
 # agent/layers/executor/executor.py
 
 import time
+import json
 import ollama
 
 from agent.layers.layerContract import LayerContract
@@ -19,7 +20,7 @@ class Executor(LayerContract, ExecutorContract):
     # ---------------------------
     # ExecutorContract method
     # ---------------------------
-    def execute(self, plan: dict) -> dict:
+    def execute(self, plan: list) -> dict:
         """
         Pure business logic. No Context dependency.
         Executes each step in the plan, calling tools when needed.
@@ -31,17 +32,17 @@ class Executor(LayerContract, ExecutorContract):
         total_output_tokens = 0
         final_output = None
 
-        for step in plan['plan']:
+        for step in plan:
             description = step['description']
 
-            tool_decision = self._decide_tool(description)
+            # _decide_tool now runs the tool itself and returns its output too
+            decision_result = self._decide_tool(description)
 
-            if tool_decision['tool']:
-                tool = self._get_tool(tool_decision['tool'])
-                tool_result = tool.run(tool_decision['tool_input'])
-                output = tool_result['result']
-                tool_used = tool_decision['tool']
-            else:
+            tool_used = decision_result['tool']
+            output = decision_result['output']
+
+            if tool_used is None:
+                # No tool matched — fall back to plain generation
                 response = ollama.generate(
                     model=self.model,
                     prompt=description,
@@ -49,7 +50,6 @@ class Executor(LayerContract, ExecutorContract):
                     stream=False
                 )
                 output = response['response']
-                tool_used = None
                 total_input_tokens += response.get('prompt_eval_count', 0)
                 total_output_tokens += response.get('eval_count', 0)
 
@@ -76,22 +76,34 @@ class Executor(LayerContract, ExecutorContract):
     def _decide_tool(self, step: str) -> dict:
         """
         Ask Ollama which tool (if any) should be used for this step.
+        If a valid tool is chosen, run it and return its output too.
+
+        Returns:
+            dict:
+                - tool: str or None - the tool name used, None if no tool
+                - output: any - tool's output if a tool ran, else None
         """
+        valid_tool_names = [t.get_definition()['name'] for t in self.tools]
+
         tools_text = ""
         for tool in self.tools:
-            definition = tool.get_definition()
-            tools_text += f"\n- Name: {definition['name']}\n  Description: {definition['description']}\n  Parameters: {definition['parameters']}"
+            d = tool.get_definition()
+            tools_text += f"\n- \"{d['name']}\": {d['description']}\n  parameters: {d['parameters']}"
 
-        prompt = f"""You have access to the following tools:
+        prompt = f"""You must choose a tool from this exact list: {valid_tool_names}
+        Do NOT invent or rename tools. Copy the tool name exactly as written.
+
+Available tools:
 {tools_text}
 
 Step to execute: {step}
 
-Decide if a tool is needed. Respond ONLY in valid JSON:
-{{
-    "tool": "tool_name or null",
-    "tool_input": {{ "param": "value" }} or null
-}}"""
+Respond ONLY in valid JSON, no markdown, no explanation:
+{{"tool": "<exact tool name from the list, or null>", "tool_input": {{...all required parameters filled in...}}}}
+
+Example:
+{{"tool": "createFile", "tool_input": {{"path": "downloads/hello.py", "content": "print('Hello, World!')"}}}}
+"""
 
         response = ollama.generate(
             model=self.model,
@@ -100,13 +112,38 @@ Decide if a tool is needed. Respond ONLY in valid JSON:
             stream=False
         )
 
-        import json
+        raw = response['response'].strip()
+
+        # Strip markdown fences if present
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            raw = raw.replace("json", "", 1).strip()
+
         try:
-            decision = json.loads(response['response'])
+            decision = json.loads(raw)
         except json.JSONDecodeError:
             decision = {"tool": None, "tool_input": None}
 
-        return decision
+        tool_name = decision.get("tool")
+        tool_input = decision.get("tool_input")
+
+        # Validate tool name against actual registered tools
+        if tool_name not in valid_tool_names:
+            if tool_name is not None:
+                print(f"[WARN] Model hallucinated unknown tool: {tool_name}")
+            return {"tool": None, "output": None}
+
+        # Run the tool and capture its output
+        tool = self._get_tool(tool_name)
+        tool_result = tool.run(tool_input)
+
+        if not tool_result.get("success", True):
+            print(f"[WARN] Tool '{tool_name}' failed: {tool_result.get('error')}")
+
+        return {
+            "tool": tool_name,
+            "output": tool_result.get("result")
+        }
 
     def _get_tool(self, tool_name: str):
         for tool in self.tools:

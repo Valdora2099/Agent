@@ -5,12 +5,20 @@ import os
 
 class OpenFolderTool(ToolContract):
 
-    def get_definition(self) -> str:
-        return (
-            "Lists every file and folder inside the given directory."
-        )
+    def get_definition(self) -> Dict[str, Any]:
+        return {
+            "name": "openFolder",
+            "description": "Lists every file and folder inside the given directory.",
+            "parameters": {
+                "path": {
+                    "type": "string",
+                    "description": "The path of the folder whose contents should be listed.",
+                    "required": True,
+                },
+            },
+        }
 
-    def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+    def run(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
 
         path = input_data["path"]
 

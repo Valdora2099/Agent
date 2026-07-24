@@ -12,7 +12,7 @@ class ToolContract(ABC):
         pass
 
     @abstractmethod
-    def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+    def run(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Executes the tool.
 

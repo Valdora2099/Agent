@@ -2,6 +2,7 @@
 
 import time
 import ollama
+import json
 
 from agent.layers.layerContract import LayerContract
 from agent.layers.planner.plannerContract import PlannerContract
@@ -19,27 +20,26 @@ class Planner(LayerContract, PlannerContract):
     # PlannerContract method
     # ---------------------------
     def plan(self, task: str) -> dict:
-        """
-        Pure business logic. No Context dependency.
-        Can be tested/used standalone.
-        """
         start_time = time.time()
-
         prompt = self._build_prompt(task)
 
         response = ollama.generate(
             model=self.model,
             prompt=prompt,
-            options={
-                "temperature": self.temperature
-            },
+            options={"temperature": self.temperature},
             stream=False
         )
 
         end_time = time.time()
 
+        try:
+            parsed = json.loads(response['response'])
+            plan_steps = parsed['plan']
+        except (json.JSONDecodeError, KeyError):
+            plan_steps = []  # or raise, or retry
+
         return {
-            "plan": response['response'],
+            "plan": plan_steps,   # now a list of step dicts, not a raw string
             "metrics": {
                 "input": response.get('prompt_eval_count', 0),
                 "output": response.get('eval_count', 0),
@@ -48,12 +48,17 @@ class Planner(LayerContract, PlannerContract):
         }
 
     def _build_prompt(self, task: str) -> str:
-        return f"""You are a planning agent. Break down the following task into clear,
-actionable steps. Each step should be specific and executable.
+        return f"""You are a planning agent. Break down the task into clear, actionable steps.
 
-Task: {task}
+    Task: {task}
 
-Provide a numbered list of steps to complete this task."""
+    Respond ONLY in valid JSON, no other text, in this exact format:
+    {{
+        "plan": [
+            {{"step": 1, "description": "..."}},
+            {{"step": 2, "description": "..."}}
+        ]
+    }}"""
 
     # ---------------------------
     # LayerContract method
