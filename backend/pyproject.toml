@@ -1,0 +1,22 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "groq>=1.6.0",
+    "ollama>=0.6.2",
+    "pydantic>=2.13.4",
+    "pydantic_core>=2.46.4",
+    "python-dotenv>=1.2.2",
+    "requests>=2.34.2",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.32,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "agent"
+module-root = "."

@@ -9,7 +9,7 @@ from tools.createFile import CreateFileTool
 from tools.editFile import EditFileTool
 from tools.viewFolder import ViewFolderTool
 
-import agent.llm;
+import agent.llm
 
 def build_tools(config: dict) -> list:
     """
