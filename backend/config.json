@@ -1,35 +1,46 @@
 {
-  "ollama": {
-    "model": "qwen3:0.6b-q4_K_M",
-    "base_url": "http://localhost:11434",
-    "temperature": 0.7,
-    "top_p": 0.9,
-    "num_predict": 500
+  "llm": {
+    "provider": "ollama",
+
+    "ollama": {
+      "model": "qwen3:1.7b",
+      "base_url": "http://localhost:11434",
+      "temperature": 0.7,
+      "top_p": 0.9,
+      "num_predict": 500
+    },
+
+    "groq": {
+      "model": "llama-3.3-70b-versatile",
+      "api_key": "",
+      "temperature": 0.7,
+      "max_tokens": 500
+    }
   },
-  "groq": {
-    "model": "llama-3.3-70b-versatile",
-    "temperature": 0.7,
-    "max_tokens": 500
-  },
+
   "agent": {
     "max_iterations": 5,
     "timeout": 300,
     "verbose": true
   },
+
   "layers": {
     "planner": {
       "enabled": true,
       "temperature": 0.5
     },
+
     "executor": {
       "enabled": true,
       "temperature": 0.7
     },
+
     "evaluator": {
       "enabled": true,
       "temperature": 0.5
     }
   },
+
   "cost_tracking": {
     "enabled": true,
     "log_level": "console",
@@ -37,11 +48,18 @@
     "track_latency": true,
     "track_tokens": true
   },
+
   "tools": {
-    "enabled": ["createFile","editFile"],
+    "enabled": [
+      "createFile",
+      "editFile",
+      "viewFolder"
+    ],
+
     "web_search": {
       "timeout": 10
     },
+
     "file_operations": {
       "allowed_paths": []
     }

@@ -1,45 +1,51 @@
-# agent/layers/evaluator/evaluator.py
-
-import time
 import json
-import ollama
 
+from agent.context import Context
 from agent.layers.layerContract import LayerContract
 from agent.layers.evaluator.evaluatorContract import EvaluatorContract
-from agent.context import Context
+from agent.llm.llmProviderContract import LLMProviderContract
 
 
 class Evaluator(LayerContract, EvaluatorContract):
 
-    def __init__(self, evaluator_config: dict, ollama_config: dict):
-        self.model = ollama_config.get("model")
-        self.base_url = ollama_config.get("base_url")
-        self.temperature = evaluator_config.get("temperature", ollama_config.get("temperature"))
+    def __init__(
+        self,
+        evaluator_config: dict,
+        llm_provider: LLMProviderContract,
+        logger
+    ):
+        self.llm = llm_provider
+        self.logger = logger
+        self.temperature = evaluator_config.get("temperature", 0)
 
-    # ---------------------------
-    # EvaluatorContract method
-    # ---------------------------
+    # ---------------------------------------------------------
+    # EvaluatorContract
+    # ---------------------------------------------------------
+
     def evaluate(self, task: str, result: dict) -> dict:
-        """
-        Pure business logic. No Context dependency.
-        Can be tested/used standalone.
-        """
-        start_time = time.time()
 
         prompt = self._build_prompt(task, result)
 
-        response = ollama.generate(
-            model=self.model,
-            prompt=prompt,
-            options={"temperature": self.temperature},
-            stream=False
+        self.logger.prompt(prompt)
+
+        response = self.llm.generate(
+            prompt,
+            temperature=self.temperature
         )
 
-        end_time = time.time()
+        self.logger.llm_response(response)
+
+        raw = response["text"].strip()
+
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            raw = raw.replace("json", "", 1).strip()
 
         try:
-            parsed = json.loads(response['response'])
+            parsed = json.loads(raw)
+
         except json.JSONDecodeError:
+
             parsed = {
                 "done": False,
                 "correct": False,
@@ -47,55 +53,106 @@ class Evaluator(LayerContract, EvaluatorContract):
                 "next_action": "Retry the previous step."
             }
 
-        return {
-            "done": parsed.get("done", False),
-            "correct": parsed.get("correct", False),
-            "thoughts": parsed.get("thoughts", ""),
-            "next_action": parsed.get("next_action", None),
-            "metrics": {
-                "input": response.get('prompt_eval_count', 0),
-                "output": response.get('eval_count', 0),
-                "time": round(end_time - start_time, 3)
-            }
+        self.logger.debug("Evaluator Decision:")
+        self.logger.debug(parsed)
+
+        metrics = {
+            "input": response["input_tokens"],
+            "output": response["output_tokens"],
+            "time": response["time"]
         }
 
+        self.logger.metrics(metrics)
+
+        return {
+
+            "done": parsed.get("done", False),
+
+            "correct": parsed.get("correct", False),
+
+            "thoughts": parsed.get("thoughts", ""),
+
+            "next_action": parsed.get("next_action"),
+
+            "metrics": metrics
+
+        }
+
+    # ---------------------------------------------------------
+    # Prompt
+    # ---------------------------------------------------------
+
     def _build_prompt(self, task: str, result: dict) -> str:
-        return f"""You are an evaluator agent. Review the result of an executed task.
 
-Original task: {task}
-Result: {result.get('result')}
-Observations: {result.get('observations')}
+        return f"""
+You are an evaluation agent.
 
-Answer the following:
-1. Is the result correct and complete?
-2. Is the original task fully done?
-3. If not done, what should happen next?
+Determine whether the task has been completed successfully.
 
-Respond ONLY in valid JSON:
+Original Task:
+{task}
+
+Execution Result:
+{result.get("result")}
+
+Tool Observations:
+{json.dumps(result.get("observations"), indent=2)}
+
+Determine:
+
+1. Is the result correct?
+2. Is the original task fully completed?
+3. If not, what should happen next?
+
+Respond ONLY with valid JSON.
+
 {{
-    "done": true or false,
-    "correct": true or false,
-    "thoughts": "your reasoning",
-    "next_action": "what to do next if not done, else null"
-}}"""
+    "done": true,
+    "correct": true,
+    "thoughts": "Short explanation.",
+    "next_action": null
+}}
+"""
 
-    # ---------------------------
-    # LayerContract method
-    # ---------------------------
+    # ---------------------------------------------------------
+    # LayerContract
+    # ---------------------------------------------------------
+
     def run(self, context: Context) -> None:
-        """
-        Pipeline adapter. Reads from and writes to shared context.
-        """
-        result = self.evaluate(context.task, {
+
+        self.logger.info("Evaluator started.")
+
+        result = self.evaluate(
+
+            context.task,
+
+            {
+                "result": context.result,
+                "observations": context.observations
+            }
+
+        )
+
+        context.done = result["done"]
+
+        context.history.append({
+
+            "plan": context.plan,
+
             "result": context.result,
-            "observations": context.observations
+
+            "thoughts": result["thoughts"],
+
+            "next_action": result["next_action"]
+
         })
 
-        context.done = result['done']
-        context.history.append({
-            "plan": context.plan,
-            "result": context.result,
-            "thoughts": result['thoughts'],
-            "next_action": result['next_action']
-        })
-        context.add_metrics("evaluator", result['metrics'])
+        context.add_metrics(
+
+            "evaluator",
+
+            result["metrics"]
+
+        )
+
+        self.logger.info("Evaluator finished.")

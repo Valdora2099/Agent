@@ -1,3 +1,3 @@
 from .createFile import CreateFileTool
-from .openFolder import OpenFolderTool
+from .viewFolder import ViewFolderTool
 from .editFile import EditFileTool

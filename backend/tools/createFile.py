@@ -9,22 +9,31 @@ class CreateFileTool(ToolContract):
         return {
             "name": "createFile",
             "description": (
-                "Creates a new file at the specified path. "
-                "If the parent directory does not exist, it is created. "
-                "Optionally writes content into the file."
+                "Create a new file at the specified path. "
+                "If the parent directories do not exist, create them automatically. "
+                "If the file already exists, overwrite its contents. "
+                "Use this tool whenever the user asks to create, save, or write a file."
             ),
             "parameters": {
-                "path": {
-                    "type": "string",
-                    "description": "The path where the file should be created.",
-                    "required": True,
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": (
+                            "Absolute or relative path of the file to create, "
+                            "including the filename and extension."
+                        )
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": (
+                            "Text content to write into the file. "
+                            "If omitted, an empty file will be created."
+                        )
+                    }
                 },
-                "content": {
-                    "type": "string",
-                    "description": "The content to write into the file. Defaults to an empty string.",
-                    "required": False,
-                },
-            },
+                "required": ["path"]
+            }
         }
 
     def run(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -36,11 +45,14 @@ class CreateFileTool(ToolContract):
             if directory:
                 os.makedirs(directory, exist_ok=True)
 
-            with open(path, "w") as file:
+            with open(path, "w", encoding="utf-8") as file:
                 file.write(content)
 
             return {
-                "result": f"File created successfully at {path}",
+                "result": {
+                    "path": path,
+                    "content_length": len(content)
+                },
                 "success": True,
                 "error": None
             }
