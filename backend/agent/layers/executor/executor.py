@@ -1,3 +1,5 @@
+# agent/layers/executor/executor.py
+
 import json
 import time
 
@@ -24,12 +26,15 @@ class Executor(LayerContract, ExecutorContract):
         self.qwen_tools = ToolAdapter.to_qwen(tools)
 
         self.logger = logger
-
     # ---------------------------------------------------------
     # ExecutorContract
     # ---------------------------------------------------------
 
-    def execute(self, plan: list) -> dict:
+    def execute(
+        self,
+        task: str,
+        plan: list
+    ) -> dict:
 
         start = time.time()
 
@@ -38,113 +43,189 @@ class Executor(LayerContract, ExecutorContract):
         total_input = 0
         total_output = 0
 
-        final_result = None
+        # Build ONE conversation
+        messages = self._build_initial_messages(
+            task,
+            plan
+        )
+        tool_iterations = 0
+        max_tool_iterations = 30
 
-        # Shared conversation for every plan step
-        messages = []
+        while tool_iterations < max_tool_iterations:
 
-        for step in plan:
+            self.logger.prompt(messages)
 
-            self.logger.debug(f"Executing Step {step['step']}")
-            self.logger.debug(step["description"])
 
-            messages.append({
-                "role": "user",
-                "content": step["description"]
-            })
+            response = self.llm.chat(
+                messages=messages,
+                temperature=self.temperature,
+                tools=self.qwen_tools
+            )
 
-            tools_used = []
+            self.logger.llm_response(response)
 
-            while True:
+            total_input += response["input_tokens"]
+            total_output += response["output_tokens"]
 
-                self.logger.prompt(messages)
+            assistant = response["message"]
 
-                response = self.llm.chat(
-                    messages=messages,
-                    temperature=self.temperature,
-                    tools=self.qwen_tools
+            messages.append(assistant)
+
+            tool_calls = assistant.get("tool_calls", [])
+
+            # Finished
+            if not tool_calls:
+
+                metrics = {
+                    "input": total_input,
+                    "output": total_output,
+                    "time": round(time.time() - start, 3)
+                }
+
+                self.logger.metrics(metrics)
+
+                return {
+
+                    "result": assistant.get("content", ""),
+
+                    "observations": observations,
+
+                    "metrics": metrics
+                }
+
+            # Execute every requested tool
+            for call in tool_calls:
+
+                tool_iterations += 1
+                
+                observation = self._handle_tool_call(
+                    call,
+                    messages
                 )
 
-                self.logger.llm_response(response)
+                observations.append(observation)
+        raise RuntimeError(
+            f"Maximum tool iterations ({max_tool_iterations}) exceeded."
+        )
+    # ---------------------------------------------------------
+    # Build initial conversation
+    # ---------------------------------------------------------
 
-                total_input += response["input_tokens"]
-                total_output += response["output_tokens"]
+    def _build_initial_messages(
+        self,
+        task: str,
+        plan: list
+    ):
 
-                assistant = response["message"]
+        formatted_plan = "\n".join(
+            f"{step['step']}. {step['description']}"
+            for step in plan
+        )
 
-                messages.append(assistant)
+        return [
 
-                tool_calls = assistant.get("tool_calls", [])
+            {
+                "role": "system",
+                "content": """
+            You are an autonomous execution agent.
 
-                # Finished this step
-                if not tool_calls:
+            You are given:
 
-                    self.logger.debug("Step completed.")
+            - the user's original task
+            - a plan created by a planner
 
-                    final_result = assistant.get("content", "")
+            Execute the plan until the original task is fully completed.
 
-                    observations.append({
-                        "step": step["step"],
-                        "tool_used": tools_used,
-                        "output": final_result
-                    })
+            Rules:
 
-                    break
+            - Use tools whenever necessary.
+            - Do not invent tool results.
+            - Base decisions only on previous conversation and tool outputs.
+            - Continue automatically after each tool call.
+            - Only stop when the entire task is complete.
+            - At the end, provide a concise summary.
+            """
+            },
 
-                # Execute every requested tool
-                for call in tool_calls:
+            {
+                "role": "user",
+                "content":
+                (
+                    f"Task:\n{task}\n\n"
+                    f"Plan:\n{formatted_plan}"
+                )
+            }
 
-                    function = call["function"]
+        ]
+    # ---------------------------------------------------------
+    # Handle a tool call
+    # ---------------------------------------------------------
 
-                    tool_name = function["name"]
-                    arguments = function["arguments"]
+    def _handle_tool_call(
+        self,
+        call,
+        messages: list
+    ) -> dict:
 
-                    self.logger.tool_call(
-                        tool_name,
-                        arguments
-                    )
+        function = call["function"]
 
-                    tool = self._get_tool(tool_name)
+        tool_name = function["name"]
+        arguments = function["arguments"]
 
-                    tool_result = tool.run(arguments)
+        self.logger.tool_call(
+            tool_name,
+            arguments
+        )
 
-                    self.logger.tool_result(tool_result)
+        tool = self._get_tool(tool_name)
 
-                    tools_used.append(tool_name)
+        try:
 
-                    messages.append({
-                        "role": "tool",
-                        "name": tool_name,
-                        "content": json.dumps(tool_result)
-                    })
+            tool_result = tool.run(arguments)
 
-        metrics = {
-            "input": total_input,
-            "output": total_output,
-            "time": round(time.time() - start, 3)
-        }
+        except Exception as e:
 
-        self.logger.metrics(metrics)
+            tool_result = {
+                "success": False,
+                "error": str(e)
+            }
+
+        self.logger.tool_result(tool_result)
+
+        messages.append({
+            "role": "tool",
+            "name": tool_name,
+            "content": json.dumps(tool_result)
+        })
 
         return {
-            "result": final_result,
-            "observations": observations,
-            "metrics": metrics
+
+            "tool": tool_name,
+
+            "arguments": arguments,
+
+            "result": tool_result
+
         }
-
     # ---------------------------------------------------------
-    # Helpers
+    # Find tool
     # ---------------------------------------------------------
 
-    def _get_tool(self, tool_name: str):
+    def _get_tool(
+        self,
+        tool_name: str
+    ):
 
         for tool in self.tools:
 
-            if tool.get_definition()["name"] == tool_name:
+            definition = tool.get_definition()
+
+            if definition["name"] == tool_name:
                 return tool
 
-        raise ValueError(f"Unknown tool '{tool_name}'")
-
+        raise ValueError(
+            f"Unknown tool '{tool_name}'"
+        )
     # ---------------------------------------------------------
     # LayerContract
     # ---------------------------------------------------------
@@ -153,7 +234,10 @@ class Executor(LayerContract, ExecutorContract):
 
         self.logger.info("Executor started.")
 
-        result = self.execute(context.plan)
+        result = self.execute(
+            task=context.task,
+            plan=context.plan
+        )
 
         context.result = result["result"]
         context.observations = result["observations"]

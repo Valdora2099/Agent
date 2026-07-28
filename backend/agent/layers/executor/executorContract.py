@@ -1,27 +1,39 @@
+# agent/layers/executor/executorContract.py
+
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
 
 
 class ExecutorContract(ABC):
     """
-    Defines the interface for executing a plan.
+    Executes an entire plan as one conversation.
 
-    Implementations are responsible for carrying out each step,
-    invoking tools when required, and returning the execution results.
+    The executor is responsible for:
+    - maintaining execution memory
+    - deciding when to call tools
+    - producing the final answer
     """
 
     @abstractmethod
-    def execute(self, plan: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def execute(
+        self,
+        task: str,
+        plan: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
         """
-        Executes a sequence of plan steps.
+        Executes the complete plan.
 
         Args:
-            plan: A list of plan steps.
+            task:
+                Original user task.
+
+            plan:
+                Planner output.
 
         Returns:
             {
-                "result": Any,
-                "observations": List[Dict[str, Any]],
+                "result": str,
+                "observations": [...],
                 "metrics": {
                     "input": int,
                     "output": int,
