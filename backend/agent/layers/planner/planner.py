@@ -13,17 +13,24 @@ class Planner(LayerContract, PlannerContract):
 
     def __init__(self, planner_config: dict, llm_provider: LLMProviderContract,logger):
         self.llm = llm_provider
-        self.temperature = planner_config.get("temperature")
+        self.temperature = planner_config.get("temperature", 0.5)
         self.logger = logger
 
     # ---------------------------
     # PlannerContract method
     # ---------------------------
-    def plan(self, task: str) -> dict:
+    def plan(self, task: str, feedback: dict | None = None) -> dict:
         """
         Pure business logic. No Context dependency.
+ 
+        Args:
+            task: The user's task/goal.
+            feedback: Optional dict from a previous failed attempt, e.g.
+                {"thoughts": "...", "next_action": "..."}. When present,
+                the planner revises the plan instead of regenerating it
+                from scratch.
         """
-        prompt = self._build_prompt(task)
+        prompt = self._build_prompt(task, feedback)
 
         self.logger.prompt(prompt)
 
@@ -64,19 +71,32 @@ class Planner(LayerContract, PlannerContract):
         }
 
 
-    def _build_prompt(self, task: str) -> str:
+    def _build_prompt(self, task: str, feedback: dict | None = None) -> str:
+        feedback_section = ""
+ 
+        if feedback and (feedback.get("thoughts") or feedback.get("next_action")):
+            feedback_section = f"""
+                A previous attempt at this task did not fully succeed.
+                
+                Previous evaluator feedback:
+                - Thoughts: {feedback.get("thoughts", "")}
+                - Suggested next action: {feedback.get("next_action", "")}
+                
+                Revise the plan to address this feedback instead of repeating the same steps.
+            """
+ 
         return f"""You are a planning agent. Break down the task into clear, actionable steps.
-
-Task: {task}
-
-Respond ONLY in valid JSON, no markdown, no explanation, in this exact format:
-{{
-    "plan": [
-        {{"step": 1, "description": "..."}},
-        {{"step": 2, "description": "..."}},
-        ...
-    ]
-}}"""
+ 
+                Task: {task}
+                {feedback_section}
+                Respond ONLY in valid JSON, no markdown, no explanation, in this exact format:
+                {{
+                    "plan": [
+                        {{"step": 1, "description": "..."}},
+                        {{"step": 2, "description": "..."}},
+                        ...
+                    ]
+            }}"""
 
     # ---------------------------
     # LayerContract method
@@ -85,7 +105,9 @@ Respond ONLY in valid JSON, no markdown, no explanation, in this exact format:
         """
         Pipeline adapter. Reads from and writes to shared context.
         """
-        result = self.plan(context.task)
-
+        feedback = context.history[-1] if context.history else None
+ 
+        result = self.plan(context.task, feedback=feedback)
+ 
         context.plan = result['plan']
         context.add_metrics("planner", result['metrics'])

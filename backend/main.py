@@ -5,11 +5,16 @@ from agent.layers.planner import Planner
 from agent.layers.executor import Executor
 from agent.layers.evaluator import Evaluator
 
+from agent.llm.providerFactory import ProviderFactory
+
+from tools.webSearch import WebSearchTool
 from tools.createFile import CreateFileTool
 from tools.editFile import EditFileTool
 from tools.viewFolder import ViewFolderTool
 
-import agent.llm;
+from dotenv import load_dotenv
+
+
 
 def build_tools(config: dict) -> list:
     """
@@ -20,6 +25,7 @@ def build_tools(config: dict) -> list:
         "createFile": CreateFileTool,
         "editFile": EditFileTool,
         "viewFolder": ViewFolderTool,
+        "webSearch": WebSearchTool,
     }
 
     tools = []
@@ -69,8 +75,14 @@ def build_pipeline(agent: Agent, tools: list) -> Pipeline:
 
 def main():
 
+    load_dotenv()
+
     agent = Agent(
         config_path="backend/config.json"
+    )
+
+    agent.llm = ProviderFactory.create(
+        agent.config["llm"]
     )
 
     tools = build_tools(agent.config)
@@ -80,7 +92,7 @@ def main():
     agent.set_pipeline(pipeline)
 
     task = (
-        "Create a file named hello.txt containing the text Hello World."
+        "Search the web and tell be about Yor Forger from spyxfamily."
     )
 
     result = agent.run(task)

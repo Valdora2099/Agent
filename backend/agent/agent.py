@@ -79,13 +79,48 @@ class Agent:
         try:
 
             with open(config_path, "r", encoding="utf-8") as file:
-                return json.load(file)
+                config = json.load(file)
+
+            return self._resolve_env(config)
 
         except json.JSONDecodeError as e:
 
             raise ValueError(
                 f"Invalid JSON in config file: {e}"
             )
+
+    def _resolve_env(self, value):
+
+        if isinstance(value, dict):
+            return {
+                k: self._resolve_env(v)
+                for k, v in value.items()
+            }
+
+        if isinstance(value, list):
+            return [
+                self._resolve_env(v)
+                for v in value
+            ]
+
+        if (
+            isinstance(value, str)
+            and value.startswith("${")
+            and value.endswith("}")
+        ):
+
+            env_name = value[2:-1]
+
+            env_value = os.getenv(env_name)
+
+            if env_value is None:
+                raise RuntimeError(
+                    f"Environment variable '{env_name}' is not set."
+                )
+
+            return env_value
+
+        return value
 
     # ---------------------------------------------------------
 

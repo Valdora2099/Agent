@@ -1,6 +1,6 @@
 {
   "llm": {
-    "provider": "ollama",
+    "provider": "groq",
 
     "ollama": {
       "model": "qwen3:1.7b",
@@ -12,7 +12,6 @@
 
     "groq": {
       "model": "llama-3.3-70b-versatile",
-      "api_key": "",
       "temperature": 0.7,
       "max_tokens": 500
     }
@@ -53,7 +52,8 @@
     "enabled": [
       "createFile",
       "editFile",
-      "viewFolder"
+      "viewFolder",
+      "webSearch"
     ],
 
     "web_search": {
@@ -63,5 +63,15 @@
     "file_operations": {
       "allowed_paths": []
     }
-  }
+  },
+
+    "search": {
+        "provider": "searxng",
+
+        "searxng": {
+            "base_url": "http://localhost:8080",
+            "timeout": 20,
+            "max_results": 5
+        }
+    }
 }

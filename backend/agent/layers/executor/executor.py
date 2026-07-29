@@ -171,6 +171,7 @@ class Executor(LayerContract, ExecutorContract):
 
         tool_name = function["name"]
         arguments = function["arguments"]
+        tool_call_id = call["id"]
 
         self.logger.tool_call(
             tool_name,
@@ -194,18 +195,16 @@ class Executor(LayerContract, ExecutorContract):
 
         messages.append({
             "role": "tool",
+            "tool_call_id": call["id"],
             "name": tool_name,
             "content": json.dumps(tool_result)
         })
 
         return {
-
+            "tool_call_id": tool_call_id,
             "tool": tool_name,
-
             "arguments": arguments,
-
             "result": tool_result
-
         }
     # ---------------------------------------------------------
     # Find tool
